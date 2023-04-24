@@ -5,6 +5,7 @@ import os
 from discord.ext import commands
 import sqlite3
 import datetime
+import csv
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
@@ -293,29 +294,17 @@ async def leaderboard(ctx):
         sorted_users = sorted(users, key=lambda user: user[2], reverse=True)
     c.close()
 
-    leaderboard = "Leaderboard:\n"
-    for i, user in enumerate(sorted_users, start=1):
+    leaderboard = "Leaderboard TOP 10:\n"
+    for i, user in enumerate(sorted_users[:10], start=1):
         leaderboard += f"{i}. {user[1]} - {user[2]} doubloons\n"
 
     await ctx.send(leaderboard)
 
 
 @bot.command(name="test")
-async def test(ctx, *args):
+async def test(ctx):
     if str(ctx.author.id) != str(admin):
         return
-
-    user_id = args[0]
-    if user_id[0] == "<":
-        user_id = user_id[2:-1]
-
-    print(f'{user_id}')
-    try:
-        user = await bot.fetch_user(user_id)
-    except:
-        print(f'User ID {user_id} does not exist')
-        return
-    print(f'{user.name}')
 
 
 @bot.event
