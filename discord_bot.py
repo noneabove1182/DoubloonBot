@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
 db.commit()
 c.close()
 emoji_doubloon_map = {
-    "☑️":
+    "☑️": 3,
     "✅": 1,
 }
 
