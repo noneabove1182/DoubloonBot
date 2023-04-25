@@ -400,7 +400,7 @@ async def leaderboard(ctx):
     for i, user in enumerate(sorted_users[:10], start=1):
         leaderboard += f"{i}. {user[1]} - {user[2]} doubloons\n"
 
-    leaderboard += f"\n See the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (limited to every 5 minutes)"
+    leaderboard += f"\n See the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (allow 60 seconds for new changes)"
     await ctx.send(leaderboard)
 
 
@@ -437,7 +437,6 @@ async def updateleaderboard():
                 f"Sheet was updated {(last_update - sheettime).seconds} seconds before the DB, proceeding with update"
             )
 
-        sheet = file.open("Leaderboard")  # open sheet
         worksheet = sheet.sheet1
 
         with db:
