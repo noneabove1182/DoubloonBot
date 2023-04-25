@@ -415,6 +415,28 @@ async def on_command_error(ctx, error):
 
 async def updateleaderboard():
     async with lock:
+        last_update = datetime.utcfromtimestamp(os.path.getmtime(db_path)).replace(
+            tzinfo=timezone.utc
+        )
+        sheet = file.open("Leaderboard")
+
+        # Grabbing sheet last updated time, and rolling back 60 seconds to buffer for time reporting differences
+        # Also reduces chances of repeated update requests
+        sheettime = datetime.strptime(
+            sheet.lastUpdateTime, "%Y-%m-%dT%H:%M:%S.%f%z"
+        ) - timedelta(seconds=60)
+
+        # If the database has been not been updated more recently than the sheet, bail out
+        if sheettime > last_update:
+            command_history(
+                f"Bailing out of sheet update - sheet was updated {(sheettime - last_update).seconds} seconds after the DB"
+            )
+            return
+        else:
+            command_history(
+                f"Sheet was updated {(last_update - sheettime).seconds} seconds before the DB, proceeding with update"
+            )
+
         sheet = file.open("Leaderboard")  # open sheet
         worksheet = sheet.sheet1
 
@@ -435,32 +457,18 @@ async def updateleaderboard():
 
 
 @bot.command(name="updateleaderboard")
-@commands.cooldown(1, 300, commands.BucketType.default)
+@commands.cooldown(1, 60, commands.BucketType.default)
 async def updateleaderboard_command(ctx):
     command_history(f"{ctx.author.id} updated the leaderboard")
 
     await updateleaderboard()
 
-    await ctx.send(f"Leaderboard updated! View it here: <{spreadsheet_link}>")
+    await ctx.send(f"Leaderboard up to date! View it here: <{spreadsheet_link}>")
 
 
 @tasks.loop(minutes=10)
 async def updateleaderboard_task():
     command_history("Auto updating the leaderboard")
-
-    last_update = datetime.utcfromtimestamp(os.path.getmtime(db_path)).replace(
-        tzinfo=timezone.utc
-    )
-    sheet = file.open("Leaderboard")
-    sheettime = datetime.strptime(sheet.lastUpdateTime, "%Y-%m-%dT%H:%M:%S.%f%z")
-
-    # If the database has been not been updated more recently than the sheet, bail out
-    # Adding 1 minute buffer to account for time reporting differences
-    if (sheettime - timedelta(seconds=60)) > last_update:
-        command_history(
-            f"Bailing out of auto sheet update - sheet was updated {(sheettime - last_update).seconds} seconds after the DB"
-        )
-        return
 
     await updateleaderboard()
 
