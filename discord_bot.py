@@ -52,6 +52,11 @@ emoji_doubloon_map = {
 valid_emojis = ["☑️", "✅"]
 
 
+def command_history(command):
+    with open("command_history.txt", "a") as f:
+        print(f"{command} at {datetime.datetime.now()}", file=f)
+
+
 def check_int(i):
     try:
         int(i)
@@ -66,6 +71,8 @@ async def on_raw_reaction_add(payload):
         return
 
     reaction = payload.emoji
+
+    command_history(f"{payload.user_id} added {reaction.name} to {payload.message_id}")
 
     if reaction.name not in valid_emojis:
         with open("error_log.txt", "a") as f:
@@ -108,7 +115,12 @@ async def on_raw_reaction_add(payload):
 async def on_raw_reaction_remove(payload):
     if str(payload.channel_id) != reaction_channel:
         return
+
     reaction = payload.emoji
+
+    command_history(
+        f"{payload.user_id} removed {reaction.name} from {payload.message_id}"
+    )
 
     if reaction.name not in valid_emojis:
         with open("error_log.txt", "a") as f:
@@ -166,6 +178,8 @@ async def on_raw_reaction_remove(payload):
 
 @bot.command(name="adddoubloons")
 async def adddoubloons(ctx, *args):
+    command_history(f"{ctx.author.id} used adddoubloons with arguments {args}")
+
     if str(ctx.author.id) not in adminsarray:
         return
 
@@ -218,7 +232,7 @@ async def adddoubloons(ctx, *args):
 
     with open("point_history.txt", "a") as f:
         print(
-            f"{ctx.author.name} added {doubloon_count} doubloons to {user.name} at {datetime.datetime.now()}",
+            f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name} at {datetime.datetime.now()}",
             file=f,
         )
 
@@ -231,6 +245,8 @@ async def adddoubloons(ctx, *args):
 
 @bot.command(name="removedoubloons")
 async def removedoubloons(ctx, *args):
+    command_history(f"{ctx.author.id} used removedoubloons with arguments {args}")
+
     if str(ctx.author.id) not in adminsarray:
         return
 
@@ -289,7 +305,7 @@ async def removedoubloons(ctx, *args):
 
     with open("point_history.txt", "a") as f:
         print(
-            f"{ctx.author.name} removed {doubloon_count} doubloons from {user.name} at {datetime.datetime.now()}",
+            f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name} at {datetime.datetime.now()}",
             file=f,
         )
     await ctx.send(
@@ -301,6 +317,7 @@ async def removedoubloons(ctx, *args):
 
 @bot.command(name="doubloons")
 async def doubloons(ctx):
+    command_history(f"{ctx.author.id} checked their doubloon count")
     with db:
         c = db.cursor()
         c.execute("SELECT doubloons FROM users WHERE id = ?", (str(ctx.author.id),))
@@ -316,6 +333,11 @@ async def doubloons(ctx):
 
 @bot.command(name="register")
 async def register(ctx, *args):
+    command_history(f"{ctx.author.id} used register with arguments {args}")
+
+    if str(ctx.author.id) not in adminsarray:
+        return
+
     if ";" in str(args):
         await ctx.send("no sql injection plz ty")
         return
@@ -362,6 +384,7 @@ async def register(ctx, *args):
 
 @bot.command(name="leaderboard")
 async def leaderboard(ctx):
+    command_history(f"{ctx.author.id} viewed the leaderboard")
     with db:
         c = db.cursor()
         c.execute("SELECT id, username, doubloons FROM users")
@@ -373,15 +396,17 @@ async def leaderboard(ctx):
     for i, user in enumerate(sorted_users[:10], start=1):
         leaderboard += f"{i}. {user[1]} - {user[2]} doubloons\n"
 
-    leaderboard += f"\n See the full board here: <{spreadsheet_link}>"
+    leaderboard += f"\n See the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (limited to every 5 minutes)"
     await ctx.send(leaderboard)
 
 
 @bot.command(name="updateleaderboard")
 @commands.cooldown(1, 300, commands.BucketType.default)
 async def updateleaderboard(ctx):
+    command_history(f"{ctx.author.id} updated the leaderboard")
+
     sheet = file.open("Leaderboard")  # open sheet
-    sheet = sheet.sheet1
+    worksheet = sheet.sheet1
 
     with db:
         c = db.cursor()
@@ -392,10 +417,11 @@ async def updateleaderboard(ctx):
 
     sheet_values = []
 
-    for user in enumerate(sorted_users, start=1):
+    for user in sorted_users:
         sheet_values.append([user[1], user[2]])
 
-    sheet.update(f"A1:B{len(sorted_users)}", sheet_values)
+    worksheet.clear()
+    worksheet.update(f"A1:B{len(sorted_users)}", sheet_values)
 
     await ctx.send(f"Leaderboard updated! View it here: <{spreadsheet_link}>")
 
@@ -403,6 +429,7 @@ async def updateleaderboard(ctx):
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
+        command_history(f"{ctx.author.id} tried updating the leaderboard too fast")
         await ctx.send(
             f"Updating sheet too often, try again in {round(error.retry_after)} seconds"
         )
@@ -411,15 +438,9 @@ async def on_command_error(ctx, error):
 @bot.command(name="test")
 async def test(ctx):
     if str(ctx.author.id) != admin:
+        print(f"non admin using test: {ctx.author.id}")
+        command_history(f"non admin using test: {ctx.author.id}")
         return
-
-    with db:
-        c = db.cursor()
-        c.execute("SELECT COUNT(*) FROM users WHERE ID LIKE '%000'")
-        affected_rows = c.fetchone()
-    c.close()
-
-    print(f"Rows to be affected: {affected_rows}")
 
 
 @bot.event
