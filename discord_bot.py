@@ -3,10 +3,9 @@ from dotenv import load_dotenv
 import os
 from discord.ext import commands, tasks
 import sqlite3
-import datetime
+from datetime import datetime, timezone, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import time
 import asyncio
 
 lock = asyncio.Lock()
@@ -59,7 +58,7 @@ valid_emojis = ["☑️", "✅"]
 
 def command_history(command):
     with open("command_history.txt", "a") as f:
-        print(f"{command} at {datetime.datetime.now()}", file=f)
+        print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {command}", file=f)
 
 
 def check_int(i):
@@ -111,7 +110,7 @@ async def on_raw_reaction_add(payload):
 
     with open("point_history.txt", "a") as f:
         print(
-            f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name} at {datetime.datetime.now()}",
+            f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name} at {datetime.now()}",
             file=f,
         )
 
@@ -176,7 +175,7 @@ async def on_raw_reaction_remove(payload):
 
     with open("point_history.txt", "a") as f:
         print(
-            f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name} at {datetime.datetime.now()}",
+            f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name} at {datetime.now()}",
             file=f,
         )
 
@@ -237,7 +236,7 @@ async def adddoubloons(ctx, *args):
 
     with open("point_history.txt", "a") as f:
         print(
-            f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name} at {datetime.datetime.now()}",
+            f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name} at {datetime.now()}",
             file=f,
         )
 
@@ -310,7 +309,7 @@ async def removedoubloons(ctx, *args):
 
     with open("point_history.txt", "a") as f:
         print(
-            f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name} at {datetime.datetime.now()}",
+            f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name} at {datetime.now()}",
             file=f,
         )
     await ctx.send(
@@ -449,14 +448,17 @@ async def updateleaderboard_command(ctx):
 async def updateleaderboard_task():
     command_history("Auto updating the leaderboard")
 
-    last_update = os.path.getmtime(db_path)
-    current_time = time.time()
-    time_difference = current_time - last_update
+    last_update = datetime.utcfromtimestamp(os.path.getmtime(db_path)).replace(
+        tzinfo=timezone.utc
+    )
+    sheet = file.open("Leaderboard")
+    sheettime = datetime.strptime(sheet.lastUpdateTime, "%Y-%m-%dT%H:%M:%S.%f%z")
 
-    # If the difference is more than 15 minutes (900 seconds), return
-    if time_difference > 900:
+    # If the database has been not been updated more recently than the sheet, bail out
+    # Adding 1 minute buffer to account for time reporting differences
+    if (sheettime - timedelta(seconds=60)) > last_update:
         command_history(
-            f"Bailing out of auto DB update - last DB change was {time_difference} seconds ago"
+            f"Bailing out of auto sheet update - sheet was updated {(sheettime - last_update).seconds} seconds after the DB"
         )
         return
 
