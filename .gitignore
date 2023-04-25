@@ -2,3 +2,5 @@
 *.txt
 *.db
 .env
+google_sheet.json
+*.bak

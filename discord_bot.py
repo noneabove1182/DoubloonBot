@@ -1,16 +1,28 @@
 import discord
-import aiohttp
 from dotenv import load_dotenv
 import os
 from discord.ext import commands
 import sqlite3
 import datetime
-import csv
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+scopes = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
+
+credentials = ServiceAccountCredentials.from_json_keyfile_name(
+    "google_sheet.json", scopes)  # access the json key you downloaded earlier
+file = gspread.authorize(credentials)  # authenticate the JSON key with gspread
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 admin = os.getenv('BOTADMIN')
 reaction_channel = os.getenv('REACTION_CHANNEL')
+spreadsheet_link = os.getenv('SPREADSHEET_LINK')
+admins = os.getenv('DISCORD_ADMINS')
+adminsarray = admins.split()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -245,6 +257,22 @@ async def removedoubloons(ctx, *args):
     return
 
 
+@bot.command(name="doubloons")
+async def doubloons(ctx):
+    with db:
+        c = db.cursor()
+        c.execute("SELECT doubloons FROM users WHERE id = ?",
+                  (str(ctx.author.id),))
+        result = c.fetchone()
+    c.close()
+
+    if result is None:
+        await ctx.send('You don\'t have any doubloonds yet!')
+        return
+
+    await ctx.send(f'You have {result[0]} doubloons!')
+
+
 @bot.command(name="register")
 async def register(ctx, *args):
     if ";" in str(args):
@@ -298,13 +326,51 @@ async def leaderboard(ctx):
     for i, user in enumerate(sorted_users[:10], start=1):
         leaderboard += f"{i}. {user[1]} - {user[2]} doubloons\n"
 
+    leaderboard += f"\n See the full board here: <{spreadsheet_link}>"
     await ctx.send(leaderboard)
+
+
+@bot.command(name="updateleaderboard")
+@commands.cooldown(1, 300, commands.BucketType.default)
+async def updateleaderboard(ctx):
+    sheet = file.open("Leaderboard")  # open sheet
+    sheet = sheet.sheet1
+
+    with db:
+        c = db.cursor()
+        c.execute("SELECT id, username, doubloons FROM users")
+        users = c.fetchall()
+        sorted_users = sorted(users, key=lambda user: user[2], reverse=True)
+    c.close()
+
+    sheet_values = []
+
+    for user in enumerate(sorted_users, start=1):
+        sheet_values.append([user[1], user[2]])
+
+    sheet.update(f'A1:B{len(sorted_users)}', sheet_values)
+
+    await ctx.send(f'Leaderboard updated! View it here: <{spreadsheet_link}>')
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f'Updating sheet too often, try again in {round(error.retry_after)} seconds')
 
 
 @bot.command(name="test")
 async def test(ctx):
     if str(ctx.author.id) != str(admin):
         return
+
+    with db:
+        c = db.cursor()
+        c.execute("SELECT COUNT(*) FROM users WHERE ID LIKE '%000'")
+        affected_rows = c.fetchone()
+    c.close()
+
+    print(f'Rows to be affected: {affected_rows}')
 
 
 @bot.event
