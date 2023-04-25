@@ -1,11 +1,15 @@
 import discord
 from dotenv import load_dotenv
 import os
-from discord.ext import commands
+from discord.ext import commands, tasks
 import sqlite3
 import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import time
+import asyncio
+
+lock = asyncio.Lock()
 
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -24,13 +28,14 @@ reaction_channel = os.getenv("REACTION_CHANNEL")
 spreadsheet_link = os.getenv("SPREADSHEET_LINK")
 admins = os.getenv("DISCORD_ADMINS")
 adminsarray = admins.split()
+db_path = "discordbot.db"
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-db = sqlite3.connect("discordbot.db")
+db = sqlite3.connect(db_path)
 
 c = db.cursor()
 c.execute(
@@ -400,32 +405,6 @@ async def leaderboard(ctx):
     await ctx.send(leaderboard)
 
 
-@bot.command(name="updateleaderboard")
-@commands.cooldown(1, 300, commands.BucketType.default)
-async def updateleaderboard(ctx):
-    command_history(f"{ctx.author.id} updated the leaderboard")
-
-    sheet = file.open("Leaderboard")  # open sheet
-    worksheet = sheet.sheet1
-
-    with db:
-        c = db.cursor()
-        c.execute("SELECT id, username, doubloons FROM users")
-        users = c.fetchall()
-        sorted_users = sorted(users, key=lambda user: user[2], reverse=True)
-    c.close()
-
-    sheet_values = []
-
-    for user in sorted_users:
-        sheet_values.append([user[1], user[2]])
-
-    worksheet.clear()
-    worksheet.update(f"A1:B{len(sorted_users)}", sheet_values)
-
-    await ctx.send(f"Leaderboard updated! View it here: <{spreadsheet_link}>")
-
-
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
@@ -433,6 +412,63 @@ async def on_command_error(ctx, error):
         await ctx.send(
             f"Updating sheet too often, try again in {round(error.retry_after)} seconds"
         )
+
+
+async def updateleaderboard():
+    async with lock:
+        sheet = file.open("Leaderboard")  # open sheet
+        worksheet = sheet.sheet1
+
+        with db:
+            c = db.cursor()
+            c.execute("SELECT id, username, doubloons FROM users")
+            users = c.fetchall()
+            sorted_users = sorted(users, key=lambda user: user[2], reverse=True)
+        c.close()
+
+        sheet_values = []
+
+        for user in sorted_users:
+            sheet_values.append([user[1], user[2]])
+
+        worksheet.clear()
+        worksheet.update(f"A1:B{len(sorted_users)}", sheet_values)
+
+
+@bot.command(name="updateleaderboard")
+@commands.cooldown(1, 300, commands.BucketType.default)
+async def updateleaderboard_command(ctx):
+    command_history(f"{ctx.author.id} updated the leaderboard")
+
+    await updateleaderboard()
+
+    await ctx.send(f"Leaderboard updated! View it here: <{spreadsheet_link}>")
+
+
+@tasks.loop(minutes=10)
+async def updateleaderboard_task():
+    command_history("Auto updating the leaderboard")
+
+    last_update = os.path.getmtime(db_path)
+    current_time = time.time()
+    time_difference = current_time - last_update
+
+    # If the difference is more than 15 minutes (900 seconds), return
+    if time_difference > 900:
+        command_history(
+            f"Bailing out of auto DB update - last DB change was {time_difference} seconds ago"
+        )
+        return
+
+    await updateleaderboard()
+
+    command_history("Leaderboard updated")
+
+
+@updateleaderboard_task.before_loop
+async def before_updateleaderboard_task():
+    await bot.wait_until_ready()
+    print("Update leaderboard task ready to start")
 
 
 @bot.command(name="test")
@@ -446,6 +482,7 @@ async def test(ctx):
 @bot.event
 async def on_ready():
     print(f"{bot.user.display_name} is online")
+    updateleaderboard_task.start()
 
 
 try:
