@@ -454,6 +454,8 @@ async def updateleaderboard():
         worksheet.clear()
         worksheet.update(f"A1:B{len(sorted_users)}", sheet_values)
 
+    command_history("Leaderboard updated")
+
 
 @bot.command(name="updateleaderboard")
 @commands.cooldown(1, 60, commands.BucketType.default)
@@ -470,8 +472,6 @@ async def updateleaderboard_task():
     command_history("Auto updating the leaderboard")
 
     await updateleaderboard()
-
-    command_history("Leaderboard updated")
 
 
 @updateleaderboard_task.before_loop
