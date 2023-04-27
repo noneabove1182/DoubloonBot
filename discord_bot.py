@@ -7,33 +7,86 @@ from datetime import datetime, timezone, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
+import subprocess
 
-lock = asyncio.Lock()
+### Helper functions ###
+def get_env_value(key):
+    value = os.getenv(key)
 
+    assert value is not None
+
+    return value
+
+async def admin_message(message):
+    if admin_user is not None:
+        await admin_user.send(message)
+
+def check_int(i):
+    try:
+        int(i)
+        return True
+    except:
+        return False
+
+def get_int(i, x=0):
+    try:
+        num = int(i)
+        return num
+    except:
+        return x
+
+
+def command_history(command):
+    with open("command_history.txt", "a") as f:
+        print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {command}", file=f)
+
+
+def log_error(error):
+    with open("log_error.txt", "a") as f:
+        print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {error}", file=f)
+
+
+def point_history(points):
+    with open("point_history.txt", "a") as f:
+        print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {points}", file=f)
+
+
+### END ###
+
+### Initializing constants
+
+# Google sheets config
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
 credentials = ServiceAccountCredentials.from_json_keyfile_name(
-    "google_sheet.json", scopes
-)  # access the json key you downloaded earlier
-file = gspread.authorize(credentials)  # authenticate the JSON key with gspread
+    "google_sheet.json", scopes # type: ignore this function accepts arrays...
+) 
 
+file = gspread.authorize(credentials)
+# END Google sheets config
+
+# Load environment variables
 load_dotenv()
-token = os.getenv("DISCORD_TOKEN")
-admin = os.getenv("BOTADMIN")
-reaction_channel = os.getenv("REACTION_CHANNEL")
-spreadsheet_link = os.getenv("SPREADSHEET_LINK")
-admins = os.getenv("DISCORD_ADMINS")
-adminsarray = admins.split()
-db_path = "discordbot.db"
+token = get_env_value("DISCORD_TOKEN")
+admin = get_env_value("BOTADMIN")
+reaction_channel = get_env_value("REACTION_CHANNEL")
+spreadsheet_link = get_env_value("SPREADSHEET_LINK")
+admins = get_env_value("DISCORD_ADMINS")
+debug_channel = get_env_value("DEBUG_CHANNEL")
+db_path = get_env_value("DB_PATH")
+# END Load environment variables
 
+# Bot config
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+# END Bot config
 
+# Database config
 db = sqlite3.connect(db_path)
 
 c = db.cursor()
@@ -48,6 +101,11 @@ CREATE TABLE IF NOT EXISTS users (
 )
 db.commit()
 c.close()
+# END Database config
+
+# Constants
+adminsarray = admins.split()
+
 emoji_doubloon_map = {
     "☑️": 3,
     "✅": 1,
@@ -55,19 +113,20 @@ emoji_doubloon_map = {
 
 valid_emojis = ["☑️", "✅"]
 
+lock = asyncio.Lock()
+# END Constants
+### END Initializing constants
 
-def command_history(command):
-    with open("command_history.txt", "a") as f:
-        print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {command}", file=f)
+### Bot events
 
+@bot.event
+async def on_ready():
+    assert bot.user is not None
 
-def check_int(i):
-    try:
-        int(i)
-        return True
-    except:
-        return False
-
+    global admin_user
+    admin_user = await bot.fetch_user(int(admin))
+    print(f"{bot.user.display_name} is online")
+    updateleaderboard_task.start()
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -79,11 +138,15 @@ async def on_raw_reaction_add(payload):
     command_history(f"{payload.user_id} added {reaction.name} to {payload.message_id}")
 
     if reaction.name not in valid_emojis:
-        with open("error_log.txt", "a") as f:
-            print(f"Invalid reaction {reaction.name}", file=f)
         return
 
     channel = bot.get_channel(payload.channel_id)
+
+    if channel is None or type(channel) is not discord.TextChannel:
+        log_error(f"{payload.channel_id} is not a text channel")
+        await admin_message(f"Error: Getting reaction channel {reaction_channel} resulted in non TextChannel")
+        return
+
     message = await channel.fetch_message(payload.message_id)
 
     user = await bot.fetch_user(payload.user_id)
@@ -108,11 +171,7 @@ async def on_raw_reaction_add(payload):
         )
     c.close()
 
-    with open("point_history.txt", "a") as f:
-        print(
-            f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name} at {datetime.now()}",
-            file=f,
-        )
+    point_history(f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name}")
 
 
 @bot.event
@@ -127,11 +186,16 @@ async def on_raw_reaction_remove(payload):
     )
 
     if reaction.name not in valid_emojis:
-        with open("error_log.txt", "a") as f:
-            print(f"Invalid reaction {reaction.name}", file=f)
+        log_error(f"Invalid reaction {reaction.name}")
         return
 
     channel = bot.get_channel(payload.channel_id)
+
+    if channel is None or type(channel) is not discord.TextChannel:
+        log_error(f"{payload.channel_id} is not a text channel")
+        await admin_message(f"Error: Getting reaction channel {reaction_channel} resulted in non TextChannel")
+        return
+
     message = await channel.fetch_message(payload.message_id)
 
     with db:
@@ -141,21 +205,13 @@ async def on_raw_reaction_remove(payload):
     c.close()
 
     if result is None:
-        with open("error_log.txt", "a") as f:
-            print(f"Error: User with ID {message.author.id} does not exist.", file=f)
-            admin_user = await bot.fetch_user(int(admin))
-            await admin_user.send(
-                f"There was a problem removing doubloons from {message.author.id} {message.author.name}, they do not exist in the DB."
-            )
+        log_error(f"Error: User with ID {message.author.id} does not exist.")
+        await admin_message(f"There was a problem removing doubloons from {message.author.id} {message.author.name}, they do not exist in the DB.")
         return
 
     current_doubloons = result[0]
     if current_doubloons - emoji_doubloon_map[reaction.name] < 0:
-        with open("error_log.txt", "a") as f:
-            print(
-                f"Error: Decreasing doubloons by {emoji_doubloon_map[reaction.name]} would result in a negative value for user with ID {message.author.id} {message.author.name}.",
-                file=f,
-            )
+        log_error(f"Error: Decreasing doubloons by {emoji_doubloon_map[reaction.name]} would result in a negative value for user with ID {message.author.id} {message.author.name}.",)
         return
 
     with db:
@@ -173,13 +229,21 @@ async def on_raw_reaction_remove(payload):
 
     user = await bot.fetch_user(payload.user_id)
 
-    with open("point_history.txt", "a") as f:
-        print(
-            f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name} at {datetime.now()}",
-            file=f,
+    point_history(f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name}")
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        command_history(f"{ctx.author.id} tried updating the leaderboard too fast")
+        await ctx.send(
+            f"Updating sheet too often, try again in {round(error.retry_after)} seconds"
         )
 
 
+### END Bot events
+
+### Admin commands
 @bot.command(name="adddoubloons")
 async def adddoubloons(ctx, *args):
     command_history(f"{ctx.author.id} used adddoubloons with arguments {args}")
@@ -234,11 +298,8 @@ async def adddoubloons(ctx, *args):
         result = c.fetchone()
     c.close()
 
-    with open("point_history.txt", "a") as f:
-        print(
-            f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name} at {datetime.now()}",
-            file=f,
-        )
+    point_history(
+            f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name}")
 
     await ctx.send(
         f"{doubloon_count} added to {user.name}! They now have {result[0]} doubloon(s)!"
@@ -307,32 +368,12 @@ async def removedoubloons(ctx, *args):
         )
     c.close()
 
-    with open("point_history.txt", "a") as f:
-        print(
-            f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name} at {datetime.now()}",
-            file=f,
-        )
+    point_history(f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name}")
     await ctx.send(
         f"{doubloon_count} doubloons removed from {user.name}, they now have {current_doubloons - int(doubloon_count)} doubloon(s)!"
     )
 
     return
-
-
-@bot.command(name="doubloons")
-async def doubloons(ctx):
-    command_history(f"{ctx.author.id} checked their doubloon count")
-    with db:
-        c = db.cursor()
-        c.execute("SELECT doubloons FROM users WHERE id = ?", (str(ctx.author.id),))
-        result = c.fetchone()
-    c.close()
-
-    if result is None:
-        await ctx.send("You don't have any doubloonds yet!")
-        return
-
-    await ctx.send(f"You have {result[0]} doubloons!")
 
 
 @bot.command(name="register")
@@ -385,6 +426,25 @@ async def register(ctx, *args):
 
     await ctx.send(f"Updated {user_id}'s username to {username}")
 
+### END Admin commands
+
+### User commands
+
+@bot.command(name="doubloons")
+async def doubloons(ctx):
+    command_history(f"{ctx.author.id} checked their doubloon count")
+    with db:
+        c = db.cursor()
+        c.execute("SELECT doubloons FROM users WHERE id = ?", (str(ctx.author.id),))
+        result = c.fetchone()
+    c.close()
+
+    if result is None:
+        await ctx.send("You don't have any doubloonds yet!")
+        return
+
+    await ctx.send(f"You have {result[0]} doubloons!")
+
 
 @bot.command(name="leaderboard")
 async def leaderboard(ctx):
@@ -403,15 +463,18 @@ async def leaderboard(ctx):
     leaderboard += f"\n See the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (allow 60 seconds for new changes)"
     await ctx.send(leaderboard)
 
+@bot.command(name="updateleaderboard")
+@commands.cooldown(1, 60, commands.BucketType.default)
+async def updateleaderboard_command(ctx):
+    command_history(f"{ctx.author.id} updated the leaderboard")
 
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandOnCooldown):
-        command_history(f"{ctx.author.id} tried updating the leaderboard too fast")
-        await ctx.send(
-            f"Updating sheet too often, try again in {round(error.retry_after)} seconds"
-        )
+    await updateleaderboard()
 
+    await ctx.send(f"Leaderboard up to date! View it here: <{spreadsheet_link}>")
+
+### END User commands
+
+### Leaderboard utilities
 
 async def updateleaderboard():
     async with lock:
@@ -457,16 +520,6 @@ async def updateleaderboard():
     command_history("Leaderboard updated")
 
 
-@bot.command(name="updateleaderboard")
-@commands.cooldown(1, 60, commands.BucketType.default)
-async def updateleaderboard_command(ctx):
-    command_history(f"{ctx.author.id} updated the leaderboard")
-
-    await updateleaderboard()
-
-    await ctx.send(f"Leaderboard up to date! View it here: <{spreadsheet_link}>")
-
-
 @tasks.loop(minutes=10)
 async def updateleaderboard_task():
     command_history("Auto updating the leaderboard")
@@ -479,19 +532,87 @@ async def before_updateleaderboard_task():
     await bot.wait_until_ready()
     print("Update leaderboard task ready to start")
 
+### END Leaderboard utilities
+
+### Debug utilities
+
+def get_file_lines(file_name, line_count):
+    try:
+        # Execute the tail command and capture its output
+        output = subprocess.check_output(['tail', f'-n{line_count}', file_name])
+        # Decode the output and print the last X lines
+        return output.decode().rstrip()
+    except subprocess.CalledProcessError as e:
+        return (f"Error while executing tail command: {e}")
+
+
+async def send_file(ctx, filename):
+    with open(filename, "rb") as f:
+        try:
+            await ctx.send(file=f)
+        except Exception as e:
+            print(f"Error sending file: {e}")
+
+
+async def send_file_lines(ctx, arg, filename):
+    try:
+        line_count = get_int(arg, 15)
+        output = get_file_lines(filename, line_count)
+        try:
+            await ctx.send(output)
+        except discord.HTTPException:
+            await ctx.send(f"Truncated output, full is {len(output)} characters:\n {output[-1500:]}")
+    except Exception as e:
+        print(f"Error sending file lines: {e}")
+
+### END Debug utilities
+
+### Debug commands
 
 @bot.command(name="test")
 async def test(ctx):
     if str(ctx.author.id) != admin:
-        print(f"non admin using test: {ctx.author.id}")
+        print(f"!test attempted by {ctx.author.id}")
         command_history(f"non admin using test: {ctx.author.id}")
         return
+    
+@bot.command(name="commandhistory")
+async def get_command_history(ctx, arg):
+    if str(ctx.channel.id) != debug_channel:
+        command_history(f"commandhistory attempted in channel {ctx.channel.id} by {ctx.author.id}")
+
+    if arg == "full":
+        await send_file(ctx, "command_history.txt")
+        return
+
+    await send_file_lines(ctx, arg, "command_history.txt")
+
+@bot.command(name="pointhistory")
+async def get_point_history(ctx, arg):
+    if str(ctx.channel.id) != debug_channel:
+        command_history(f"pointhistory attempted in channel {ctx.channel.id} by {ctx.author.id}")
+
+    if arg == "full":
+        await send_file(ctx, "point_history.txt")
+        return
+
+    await send_file_lines(ctx, arg, "point_history.txt")
+
+@bot.command(name="errorlog")
+async def get_error_log(ctx, arg):
+    if str(ctx.author.id) != admin:
+        command_history(f"errorlog attempted in channel {ctx.channel.id} by {ctx.author.id}")
+
+    if arg == "full":
+        await send_file(ctx, "error_log.txt")
+        return
+
+    await send_file_lines(ctx, arg, "error_log.txt")
+
+### END Debug commands
 
 
-@bot.event
-async def on_ready():
-    print(f"{bot.user.display_name} is online")
-    updateleaderboard_task.start()
+### Start the bot
 
 
 try:
