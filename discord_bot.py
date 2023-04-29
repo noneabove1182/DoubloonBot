@@ -577,7 +577,7 @@ async def test(ctx):
         return
     
 @bot.command(name="commandhistory")
-async def get_command_history(ctx, arg):
+async def get_command_history(ctx, *arg):
     if str(ctx.channel.id) != debug_channel:
         command_history(f"commandhistory attempted in channel {ctx.channel.id} by {ctx.author.id}")
 
@@ -588,7 +588,7 @@ async def get_command_history(ctx, arg):
     await send_file_lines(ctx, arg, "command_history.txt")
 
 @bot.command(name="pointhistory")
-async def get_point_history(ctx, arg):
+async def get_point_history(ctx, *arg):
     if str(ctx.channel.id) != debug_channel:
         command_history(f"pointhistory attempted in channel {ctx.channel.id} by {ctx.author.id}")
 
@@ -599,7 +599,7 @@ async def get_point_history(ctx, arg):
     await send_file_lines(ctx, arg, "point_history.txt")
 
 @bot.command(name="errorlog")
-async def get_error_log(ctx, arg):
+async def get_error_log(ctx, *arg):
     if str(ctx.author.id) != admin:
         command_history(f"errorlog attempted in channel {ctx.channel.id} by {ctx.author.id}")
 
