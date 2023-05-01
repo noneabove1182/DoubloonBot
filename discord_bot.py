@@ -9,6 +9,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
 import subprocess
 
+
 ### Helper functions ###
 def get_env_value(key):
     value = os.getenv(key)
@@ -17,9 +18,11 @@ def get_env_value(key):
 
     return value
 
+
 async def admin_message(message):
     if admin_user is not None:
         await admin_user.send(message)
+
 
 def check_int(i):
     try:
@@ -27,6 +30,7 @@ def check_int(i):
         return True
     except:
         return False
+
 
 def get_int(i, x=0):
     try:
@@ -62,8 +66,8 @@ scopes = [
 ]
 
 credentials = ServiceAccountCredentials.from_json_keyfile_name(
-    "google_sheet.json", scopes # type: ignore this function accepts arrays...
-) 
+    "google_sheet.json", scopes  # type: ignore this function accepts arrays...
+)
 
 file = gspread.authorize(credentials)
 # END Google sheets config
@@ -119,6 +123,7 @@ lock = asyncio.Lock()
 
 ### Bot events
 
+
 @bot.event
 async def on_ready():
     assert bot.user is not None
@@ -127,6 +132,7 @@ async def on_ready():
     admin_user = await bot.fetch_user(int(admin))
     print(f"{bot.user.display_name} is online")
     updateleaderboard_task.start()
+
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -144,7 +150,9 @@ async def on_raw_reaction_add(payload):
 
     if channel is None or type(channel) is not discord.TextChannel:
         log_error(f"{payload.channel_id} is not a text channel")
-        await admin_message(f"Error: Getting reaction channel {reaction_channel} resulted in non TextChannel")
+        await admin_message(
+            f"Error: Getting reaction channel {reaction_channel} resulted in non TextChannel"
+        )
         return
 
     message = await channel.fetch_message(payload.message_id)
@@ -171,7 +179,9 @@ async def on_raw_reaction_add(payload):
         )
     c.close()
 
-    point_history(f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name}")
+    point_history(
+        f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name}"
+    )
 
 
 @bot.event
@@ -193,7 +203,9 @@ async def on_raw_reaction_remove(payload):
 
     if channel is None or type(channel) is not discord.TextChannel:
         log_error(f"{payload.channel_id} is not a text channel")
-        await admin_message(f"Error: Getting reaction channel {reaction_channel} resulted in non TextChannel")
+        await admin_message(
+            f"Error: Getting reaction channel {reaction_channel} resulted in non TextChannel"
+        )
         return
 
     message = await channel.fetch_message(payload.message_id)
@@ -206,12 +218,16 @@ async def on_raw_reaction_remove(payload):
 
     if result is None:
         log_error(f"Error: User with ID {message.author.id} does not exist.")
-        await admin_message(f"There was a problem removing doubloons from {message.author.id} {message.author.name}, they do not exist in the DB.")
+        await admin_message(
+            f"There was a problem removing doubloons from {message.author.id} {message.author.name}, they do not exist in the DB."
+        )
         return
 
     current_doubloons = result[0]
     if current_doubloons - emoji_doubloon_map[reaction.name] < 0:
-        log_error(f"Error: Decreasing doubloons by {emoji_doubloon_map[reaction.name]} would result in a negative value for user with ID {message.author.id} {message.author.name}.",)
+        log_error(
+            f"Error: Decreasing doubloons by {emoji_doubloon_map[reaction.name]} would result in a negative value for user with ID {message.author.id} {message.author.name}.",
+        )
         return
 
     with db:
@@ -229,7 +245,9 @@ async def on_raw_reaction_remove(payload):
 
     user = await bot.fetch_user(payload.user_id)
 
-    point_history(f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name}")
+    point_history(
+        f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name}"
+    )
 
 
 @bot.event
@@ -242,6 +260,7 @@ async def on_command_error(ctx, error):
 
 
 ### END Bot events
+
 
 ### Admin commands
 @bot.command(name="adddoubloons")
@@ -299,7 +318,8 @@ async def adddoubloons(ctx, *args):
     c.close()
 
     point_history(
-            f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name}")
+        f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name}"
+    )
 
     await ctx.send(
         f"{doubloon_count} added to {user.name}! They now have {result[0]} doubloon(s)!"
@@ -368,7 +388,9 @@ async def removedoubloons(ctx, *args):
         )
     c.close()
 
-    point_history(f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name}")
+    point_history(
+        f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name}"
+    )
     await ctx.send(
         f"{doubloon_count} doubloons removed from {user.name}, they now have {current_doubloons - int(doubloon_count)} doubloon(s)!"
     )
@@ -426,9 +448,11 @@ async def register(ctx, *args):
 
     await ctx.send(f"Updated {user_id}'s username to {username}")
 
+
 ### END Admin commands
 
 ### User commands
+
 
 @bot.command(name="doubloons")
 async def doubloons(ctx):
@@ -463,6 +487,7 @@ async def leaderboard(ctx):
     leaderboard += f"\n See the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (allow 60 seconds for new changes)"
     await ctx.send(leaderboard)
 
+
 @bot.command(name="updateleaderboard")
 @commands.cooldown(1, 60, commands.BucketType.default)
 async def updateleaderboard_command(ctx):
@@ -472,9 +497,11 @@ async def updateleaderboard_command(ctx):
 
     await ctx.send(f"Leaderboard up to date! View it here: <{spreadsheet_link}>")
 
+
 ### END User commands
 
 ### Leaderboard utilities
+
 
 async def updateleaderboard():
     async with lock:
@@ -532,24 +559,26 @@ async def before_updateleaderboard_task():
     await bot.wait_until_ready()
     print("Update leaderboard task ready to start")
 
+
 ### END Leaderboard utilities
 
 ### Debug utilities
 
+
 def get_file_lines(file_name, line_count):
     try:
         # Execute the tail command and capture its output
-        output = subprocess.check_output(['tail', f'-n{line_count}', file_name])
+        output = subprocess.check_output(["tail", f"-n{line_count}", file_name])
         # Decode the output and print the last X lines
         return output.decode().rstrip()
     except subprocess.CalledProcessError as e:
-        return (f"Error while executing tail command: {e}")
+        return f"Error while executing tail command: {e}"
 
 
 async def send_file(ctx, filename):
     with open(filename, "rb") as f:
         try:
-            await ctx.send(file=f)
+            await ctx.send(file=discord.File(f))
         except Exception as e:
             print(f"Error sending file: {e}")
 
@@ -561,13 +590,17 @@ async def send_file_lines(ctx, arg, filename):
         try:
             await ctx.send(output)
         except discord.HTTPException:
-            await ctx.send(f"Truncated output, full is {len(output)} characters:\n {output[-1500:]}")
+            await ctx.send(
+                f"Truncated output, full is {len(output)} characters:\n {output[-1500:]}"
+            )
     except Exception as e:
         print(f"Error sending file lines: {e}")
+
 
 ### END Debug utilities
 
 ### Debug commands
+
 
 @bot.command(name="test")
 async def test(ctx):
@@ -575,11 +608,14 @@ async def test(ctx):
         print(f"!test attempted by {ctx.author.id}")
         command_history(f"non admin using test: {ctx.author.id}")
         return
-    
+
+
 @bot.command(name="commandhistory")
-async def get_command_history(ctx, *arg):
+async def get_command_history(ctx, arg=15):
     if str(ctx.channel.id) != debug_channel:
-        command_history(f"commandhistory attempted in channel {ctx.channel.id} by {ctx.author.id}")
+        command_history(
+            f"commandhistory attempted in channel {ctx.channel.id} by {ctx.author.id}"
+        )
 
     if arg == "full":
         await send_file(ctx, "command_history.txt")
@@ -587,10 +623,15 @@ async def get_command_history(ctx, *arg):
 
     await send_file_lines(ctx, arg, "command_history.txt")
 
+
 @bot.command(name="pointhistory")
-async def get_point_history(ctx, *arg):
+async def get_point_history(ctx, arg=15):
     if str(ctx.channel.id) != debug_channel:
-        command_history(f"pointhistory attempted in channel {ctx.channel.id} by {ctx.author.id}")
+        command_history(
+            f"pointhistory attempted in channel {ctx.channel.id} by {ctx.author.id}"
+        )
+
+    print(type(arg))
 
     if arg == "full":
         await send_file(ctx, "point_history.txt")
@@ -598,16 +639,20 @@ async def get_point_history(ctx, *arg):
 
     await send_file_lines(ctx, arg, "point_history.txt")
 
+
 @bot.command(name="errorlog")
-async def get_error_log(ctx, *arg):
+async def get_error_log(ctx, arg=15):
     if str(ctx.author.id) != admin:
-        command_history(f"errorlog attempted in channel {ctx.channel.id} by {ctx.author.id}")
+        command_history(
+            f"errorlog attempted in channel {ctx.channel.id} by {ctx.author.id}"
+        )
 
     if arg == "full":
         await send_file(ctx, "error_log.txt")
         return
 
     await send_file_lines(ctx, arg, "error_log.txt")
+
 
 ### END Debug commands
 
