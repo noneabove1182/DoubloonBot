@@ -3,5 +3,5 @@
 *.db
 .env
 google_sheet.json
-*.bak
+*.bak*
 pytester.py

@@ -8,6 +8,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
 import subprocess
+from itertools import zip_longest
 
 
 ### Helper functions ###
@@ -50,9 +51,76 @@ def log_error(error):
         print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {error}", file=f)
 
 
+def log_debug(debug):
+    with open("debug.txt", "a") as f:
+        print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {debug}", file=f)
+
+
 def point_history(points):
     with open("point_history.txt", "a") as f:
         print(f"{datetime.now():%Y-%m-%d %I:%M%p} - {points}", file=f)
+
+
+def map_doubloons_to_rank(value):
+    if 0 <= value <= 99:
+        return "skull"
+    elif 100 <= value <= 499:
+        return "bronze"
+    elif 500 <= value <= 999:
+        return "iron"
+    elif 1000 <= value <= 2499:
+        return "mithril"
+    elif 2500 <= value <= 4999:
+        return "adamant"
+    elif 5000 <= value <= 9999:
+        return "runite"
+    else:
+        return "dragon"
+
+
+def populate_roles(guild):
+    roles = []
+    roles.append(guild.get_role(get_int(bronze_role)))
+    roles.append(guild.get_role(get_int(iron_role)))
+    roles.append(guild.get_role(get_int(mithril_role)))
+    roles.append(guild.get_role(get_int(adamant_role)))
+    roles.append(guild.get_role(get_int(runite_role)))
+    roles.append(guild.get_role(get_int(dragon_role)))
+    return roles
+
+
+def get_roles(rank):
+    final_roles = []
+    if rank == "skull":
+        return final_roles
+
+    for role in roles:
+        final_roles.append(role)
+        if role.name.lower() == rank:
+            return final_roles
+
+    return final_roles
+
+
+async def handle_rank_transition(user_id, rank):
+    log_debug(f"In handle_rank_transition {user_id}, {rank}")
+    if guild is not None and roles is not None:
+        member = guild.get_member(get_int(user_id))
+        if member is not None:
+            new_roles = get_roles(rank)
+            await member.remove_roles(*roles)
+            await member.add_roles(*new_roles)
+        else:
+            log_debug(f"Membber is null: {user_id}, {member}")
+    else:
+        log_error(f"Guild or roles is null: {guild} {roles}")
+
+
+# def get_ranks(rank):
+
+
+# def set_rank(member, rank):
+#    if rank == "skull":
 
 
 ### END ###
@@ -81,11 +149,19 @@ spreadsheet_link = get_env_value("SPREADSHEET_LINK")
 admins = get_env_value("DISCORD_ADMINS")
 debug_channel = get_env_value("DEBUG_CHANNEL")
 db_path = get_env_value("DB_PATH")
+guild_id = get_env_value("GUILD_ID")
+bronze_role = get_env_value("BRONZE_ROLE")
+iron_role = get_env_value("IRON_ROLE")
+mithril_role = get_env_value("MITHRIL_ROLE")
+adamant_role = get_env_value("ADAMANT_ROLE")
+runite_role = get_env_value("RUNITE_ROLE")
+dragon_role = get_env_value("DRAGON_ROLE")
 # END Load environment variables
 
 # Bot config
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 # END Bot config
@@ -99,7 +175,8 @@ c.execute(
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
     username TEXT,
-    doubloons INTEGER
+    doubloons INTEGER,
+    rank TEXT
 )
 """
 )
@@ -115,10 +192,22 @@ emoji_doubloon_map = {
     "✅": 1,
 }
 
+categories = {
+    "skull": [],
+    "bronze": [],
+    "iron": [],
+    "mithril": [],
+    "adamant": [],
+    "runite": [],
+    "dragon": [],
+}
+
 valid_emojis = ["☑️", "✅"]
 
 lock = asyncio.Lock()
+
 # END Constants
+
 ### END Initializing constants
 
 ### Bot events
@@ -130,6 +219,13 @@ async def on_ready():
 
     global admin_user
     admin_user = await bot.fetch_user(int(admin))
+
+    global guild
+    guild = bot.get_guild(get_int(guild_id))
+
+    global roles
+    roles = populate_roles(guild)
+
     print(f"{bot.user.display_name} is online")
     updateleaderboard_task.start()
 
@@ -160,27 +256,50 @@ async def on_raw_reaction_add(payload):
     user = await bot.fetch_user(payload.user_id)
     with db:
         c = db.cursor()
+
         c.execute(
             """
-        INSERT OR IGNORE INTO users (id, username, doubloons)
-        VALUES (?, ?, ?)
+        INSERT OR IGNORE INTO users (id, username, doubloons, rank)
+        VALUES (?, ?, ?, ?)
         """,
-            (message.author.id, message.author.name, 0),
+            (message.author.id, message.author.name, 0, "skull"),
         )
+
+        # Get the user to check if rank needs to be updated
+        c.execute(
+            """
+            SELECT doubloons, rank
+            FROM users
+            WHERE id = ?
+        """,
+            (message.author.id,),
+        )
+        result = c.fetchone()
+
+        new_doubloons = get_int(result[0]) + emoji_doubloon_map[reaction.name]
+        rank = map_doubloons_to_rank(new_doubloons)
+        if rank != result[1]:
+            await handle_rank_transition(message.author.id, rank)
 
         # Update the user's doubloons value in the database
         c.execute(
             """
         UPDATE users
-        SET doubloons = doubloons + ?
+        SET doubloons = ?, username = ?, rank = ?
         WHERE id = ?
         """,
-            (emoji_doubloon_map[reaction.name], message.author.id),
+            (
+                new_doubloons,
+                message.author.name,
+                rank,
+                message.author.id,
+            ),
         )
+
     c.close()
 
     point_history(
-        f"{user.name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name}"
+        f"{user.display_name} added {emoji_doubloon_map[reaction.name]} doubloons to {message.author.name}"
     )
 
 
@@ -223,8 +342,8 @@ async def on_raw_reaction_remove(payload):
         )
         return
 
-    current_doubloons = result[0]
-    if current_doubloons - emoji_doubloon_map[reaction.name] < 0:
+    new_doubloons = result[0] - emoji_doubloon_map[reaction.name]
+    if new_doubloons < 0:
         log_error(
             f"Error: Decreasing doubloons by {emoji_doubloon_map[reaction.name]} would result in a negative value for user with ID {message.author.id} {message.author.name}.",
         )
@@ -232,21 +351,43 @@ async def on_raw_reaction_remove(payload):
 
     with db:
         c = db.cursor()
+
+        # Get the user to check if rank needs to be updated
+        c.execute(
+            """
+            SELECT doubloons, rank
+            FROM users
+            WHERE id = ?
+        """,
+            (message.author.id,),
+        )
+        result = c.fetchone()
+
+        new_doubloons = get_int(result[0]) + emoji_doubloon_map[reaction.name]
+        rank = map_doubloons_to_rank(new_doubloons)
+        if rank != result[1]:
+            await handle_rank_transition(message.author.id, rank)
+
         # Update the user's doubloons value in the database
         c.execute(
             """
         UPDATE users
-        SET doubloons = doubloons - ?
+        SET doubloons = ?, username = ?, rank = ?
         WHERE id = ?
         """,
-            (emoji_doubloon_map[reaction.name], message.author.id),
+            (
+                new_doubloons,
+                message.author.name,
+                rank,
+                message.author.id,
+            ),
         )
     c.close()
 
     user = await bot.fetch_user(payload.user_id)
 
     point_history(
-        f"{user.name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name}"
+        f"{user.display_name} removed {emoji_doubloon_map[reaction.name]} doubloons from {message.author.name}"
     )
 
 
@@ -297,20 +438,42 @@ async def adddoubloons(ctx, *args):
         c = db.cursor()
         c.execute(
             """
-        INSERT OR IGNORE INTO users (id, username, doubloons)
-        VALUES (?, ?, ?)
+        INSERT OR IGNORE INTO users (id, username, doubloons, rank)
+        VALUES (?, ?, ?, ?)
         """,
-            (user_id, user.name, 0),
+            (user_id, user.display_name, 0, "skull"),
         )
 
+        # Get the user to check if rank needs to be updated
+        c.execute(
+            """
+            SELECT doubloons, rank
+            FROM users
+            WHERE id = ?
+        """,
+            (user_id,),
+        )
+        result = c.fetchone()
+        new_doubloons = get_int(result[0]) + get_int(doubloon_count)
+        rank = map_doubloons_to_rank(new_doubloons)
+
+        if rank != result[1]:
+            await handle_rank_transition(user_id, rank)
+
         # Update the user's doubloons value in the database
+
         c.execute(
             """
         UPDATE users
-        SET doubloons = doubloons + ?
+        SET doubloons = ?, username = ?, rank = ?
         WHERE id = ?
         """,
-            (doubloon_count, user_id),
+            (
+                new_doubloons,
+                user.display_name,
+                rank,
+                user_id,
+            ),
         )
 
         c.execute("SELECT doubloons FROM users WHERE id = ?", (user_id,))
@@ -318,11 +481,11 @@ async def adddoubloons(ctx, *args):
     c.close()
 
     point_history(
-        f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.name}"
+        f"{ctx.author.name} manually added {doubloon_count} doubloons to {user.display_name}"
     )
 
     await ctx.send(
-        f"{doubloon_count} added to {user.name}! They now have {result[0]} doubloon(s)!"
+        f"{doubloon_count} added to {user.display_name}! They now have {result[0]} doubloon(s)!"
     )
 
     return
@@ -365,34 +528,58 @@ async def removedoubloons(ctx, *args):
     c.close()
 
     if result is None:
-        await ctx.send(f"{user.name} doesn't have any doubloonds yet!")
+        await ctx.send(f"{user.display_name} doesn't have any doubloons yet!")
         return
 
     current_doubloons = result[0]
-    if current_doubloons - int(doubloon_count) < 0:
+    final_doubloons = current_doubloons - int(doubloon_count)
+    if final_doubloons < 0:
         await ctx.send(
-            f"{user.name} only has {current_doubloons} doubloon(s)! You can remove them all by using the exact number."
+            f"{user.display_name} only has {current_doubloons} doubloon(s)! You can remove them all by using the exact number."
         )
         return
 
     with db:
         c = db.cursor()
+
+        # Get the user to check if rank needs to be updated
+        c.execute(
+            """
+            SELECT doubloons, rank
+            FROM users
+            WHERE id = ?
+        """,
+            (user_id,),
+        )
+        result = c.fetchone()
+
+        new_doubloons = get_int(result[0]) - get_int(doubloon_count)
+        rank = map_doubloons_to_rank(new_doubloons)
+        if rank != result[1]:
+            await handle_rank_transition(user_id, rank)
+
         # Update the user's doubloons value in the database
+
         c.execute(
             """
         UPDATE users
-        SET doubloons = doubloons - ?
+        SET doubloons = ?, username = ?, rank = ?
         WHERE id = ?
         """,
-            (doubloon_count, user_id),
+            (
+                new_doubloons,
+                user.display_name,
+                rank,
+                user_id,
+            ),
         )
     c.close()
 
     point_history(
-        f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.name}"
+        f"{ctx.author.name} manually removed {doubloon_count} doubloons from {user.display_name}"
     )
     await ctx.send(
-        f"{doubloon_count} doubloons removed from {user.name}, they now have {current_doubloons - int(doubloon_count)} doubloon(s)!"
+        f"{doubloon_count} doubloons removed from {user.display_name}, they now have {current_doubloons - int(doubloon_count)} doubloon(s)!"
     )
 
     return
@@ -429,10 +616,10 @@ async def register(ctx, *args):
         c = db.cursor()
         c.execute(
             """
-        INSERT OR IGNORE INTO users (id, username, doubloons)
-        VALUES (?, ?, ?)
+        INSERT OR IGNORE INTO users (id, username, doubloons, rank)
+        VALUES (?, ?, ?, ?)
         """,
-            (user_id, username, 0),
+            (user_id, username, 0, "skull"),
         )
 
         # Update the user's doubloons value in the database
@@ -464,7 +651,7 @@ async def doubloons(ctx):
     c.close()
 
     if result is None:
-        await ctx.send("You don't have any doubloonds yet!")
+        await ctx.send("You don't have any doubloons yet!")
         return
 
     await ctx.send(f"You have {result[0]} doubloons!")
@@ -543,6 +730,24 @@ async def updateleaderboard():
 
         worksheet.clear()
         worksheet.update(f"A1:B{len(sorted_users)}", sheet_values)
+
+        for category in categories.values():
+            category.clear()
+
+        for user in sorted_users:
+            category = map_doubloons_to_rank(get_int(user[2]))
+            categories[category].append(user[1])
+
+        array = [users for users in categories.values()]
+
+        transposed = list(zip_longest(*array, fillvalue=""))
+
+        worksheet = sheet.worksheet("Ranks")
+
+        worksheet.batch_clear(["A2:G1000"])
+        worksheet.update(f"A2:G{len(transposed) + 1}", transposed)
+
+        log_error(f"A2:G{len(transposed) + 1} {transposed}")
 
     command_history("Leaderboard updated")
 
