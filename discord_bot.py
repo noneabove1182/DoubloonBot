@@ -188,8 +188,8 @@ c.close()
 adminsarray = admins.split()
 
 emoji_doubloon_map = {
-    "☑️": 3,
-    "✅": 1,
+    "☑️": 10,
+    "✅": 3,
 }
 
 categories = {
