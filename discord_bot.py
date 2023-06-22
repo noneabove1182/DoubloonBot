@@ -116,13 +116,6 @@ async def handle_rank_transition(user_id, rank):
         log_error(f"Guild or roles is null: {guild} {roles}")
 
 
-# def get_ranks(rank):
-
-
-# def set_rank(member, rank):
-#    if rank == "skull":
-
-
 ### END ###
 
 ### Initializing constants
@@ -232,6 +225,9 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload):
+    if str(payload.user_id) not in adminsarray:
+        return
+
     if str(payload.channel_id) != reaction_channel:
         return
 
@@ -305,6 +301,9 @@ async def on_raw_reaction_add(payload):
 
 @bot.event
 async def on_raw_reaction_remove(payload):
+    if str(payload.user_id) not in adminsarray:
+        return
+
     if str(payload.channel_id) != reaction_channel:
         return
 
@@ -642,23 +641,34 @@ async def register(ctx, *args):
 
 
 @bot.command(name="doubloons")
-async def doubloons(ctx):
-    command_history(f"{ctx.author.id} checked their doubloon count")
+async def doubloons(ctx, *args):
+    command_history(
+        f"{ctx.author.id} checked doubloon count with args {args} arg len {len(args)}"
+    )
+
+    if len(args) < 1:
+        user_id = ctx.author.id
+    else:
+        user_id = args[0]
+
+    if str(user_id)[0] == "<":
+        user_id = user_id[2:-1]
+
     with db:
         c = db.cursor()
-        c.execute("SELECT doubloons FROM users WHERE id = ?", (str(ctx.author.id),))
+        c.execute("SELECT doubloons FROM users WHERE id = ?", (str(user_id),))
         result = c.fetchone()
     c.close()
 
     if result is None:
-        await ctx.send("You don't have any doubloons yet!")
+        await ctx.send("No doubloons yet!")
         return
 
-    await ctx.send(f"You have {result[0]} doubloons!")
+    await ctx.send(f"Doubloon count is {result[0]}!")
 
 
 @bot.command(name="leaderboard")
-async def leaderboard(ctx):
+async def leaderboard(ctx, arg=25):
     command_history(f"{ctx.author.id} viewed the leaderboard")
     with db:
         c = db.cursor()
@@ -667,12 +677,37 @@ async def leaderboard(ctx):
         sorted_users = sorted(users, key=lambda user: user[2], reverse=True)
     c.close()
 
-    leaderboard = "Leaderboard TOP 10:\n"
-    for i, user in enumerate(sorted_users[:10], start=1):
+    numSentMessages = 0
+
+    numEntries = min(get_int(arg, 25), len(sorted_users))
+
+    finalCount = numEntries
+
+    leaderboardMessages = []
+
+    leaderboard = ""
+
+    for i, user in enumerate(sorted_users[:numEntries], start=1):
+        if len(leaderboard) > 1700:
+            if numSentMessages > 1:
+                finalCount = i
+                break
+            leaderboardMessages.append(leaderboard)
+            numSentMessages += 1
+            leaderboard = ""
         leaderboard += f"{i}. {user[1]} - {user[2]} doubloons\n"
 
-    leaderboard += f"\n See the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (allow 60 seconds for new changes)"
-    await ctx.send(leaderboard)
+    if finalCount != numEntries:
+        leaderboard += f"\nResults truncated, see the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (allow 60 seconds for new changes)"
+    else:
+        leaderboard += f"\nSee the full board here: <{spreadsheet_link}>\nand update it with !updateleaderboard (allow 60 seconds for new changes)"
+
+    leaderboardMessages.append(leaderboard)
+
+    leaderboardMessages[0] = f"Leaderboard TOP {finalCount}:\n" + leaderboardMessages[0]
+
+    for message in leaderboardMessages:
+        await ctx.send(message)
 
 
 @bot.command(name="updateleaderboard")
